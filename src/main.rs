@@ -1,7 +1,7 @@
 use clap::Parser;
 use kontroll::Kontroll;
 use rand::Rng;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use tokio::time::{interval, sleep, Duration};
 
 #[derive(Parser, Debug)]
@@ -23,6 +23,7 @@ struct Drop {
     head_row: f32,
     length: usize,
     speed: f32,
+    sparkle: bool,
 }
 
 fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
@@ -54,8 +55,9 @@ fn create_drops(count: usize) -> Vec<Drop> {
         .map(|_| Drop {
             column: rng.gen_range(0..12),
             head_row: rng.gen_range(-8.0..0.0),
-            length: rng.gen_range(2..=4),
+            length: rng.gen_range(3..=5),
             speed: rng.gen_range(0.08..0.20),
+            sparkle: rng.gen_bool(0.15),
         })
         .collect()
 }
@@ -67,21 +69,44 @@ fn update_drops(drops: &mut [Drop]) {
         if drop.head_row - drop.length as f32 > 4.0 {
             drop.column = rng.gen_range(0..12);
             drop.head_row = -(rng.gen_range(4.0..10.0));
-            drop.length = rng.gen_range(2..=4);
+            drop.length = rng.gen_range(3..=5);
             drop.speed = rng.gen_range(0.08..0.20);
+            drop.sparkle = rng.gen_bool(0.15);
         }
     }
 }
 
-fn get_lit_leds(drops: &[Drop]) -> HashSet<usize> {
-    let mut lit = HashSet::new();
+/// Compute current LED colors. Returns a map of LED index -> (r, g, b).
+/// Each drop renders with a brightness gradient: head is brightest, tail fades to dim.
+/// Sparkle drops get an extra brightness boost on the head.
+fn get_lit_leds(drops: &[Drop], base_r: u8, base_g: u8, base_b: u8) -> HashMap<usize, (u8, u8, u8)> {
+    let mut lit: HashMap<usize, (u8, u8, u8)> = HashMap::new();
     for drop in drops {
         let head = drop.head_row.floor() as isize;
         for offset in 0..drop.length as isize {
             let row = head - offset;
             if row >= 0 && row < 5 {
                 if let Some(led) = pos_to_led(drop.column, row as usize) {
-                    lit.insert(led);
+                    // Fade from 1.0 (head) down to ~0.15 (tail)
+                    let mut brightness = 1.0 - (offset as f32 / drop.length as f32) * 0.85;
+
+                    // Sparkle drops get a brighter head
+                    if offset == 0 && drop.sparkle {
+                        brightness = (brightness * 1.4).min(1.0);
+                    }
+
+                    let r = (base_r as f32 * brightness).min(255.0) as u8;
+                    let g = (base_g as f32 * brightness).min(255.0) as u8;
+                    let b = (base_b as f32 * brightness).min(255.0) as u8;
+
+                    // If multiple drops overlap, keep the brightest channel-wise
+                    lit.entry(led)
+                        .and_modify(|(cr, cg, cb)| {
+                            *cr = (*cr).max(r);
+                            *cg = (*cg).max(g);
+                            *cb = (*cb).max(b);
+                        })
+                        .or_insert((r, g, b));
                 }
             }
         }
@@ -116,7 +141,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("zsa-voyager-matrix: starting animation (color: {}, fps: {}, drops: {})", args.color, args.fps, args.drops);
 
     let mut drops = create_drops(args.drops);
-    let mut prev_lit: HashSet<usize> = HashSet::new();
+    let mut prev_lit: HashMap<usize, (u8, u8, u8)> = HashMap::new();
 
     let period = Duration::from_millis(1000 / args.fps.max(1));
     let mut ticker = interval(period);
@@ -127,14 +152,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tokio::select! {
             _ = ticker.tick() => {
                 update_drops(&mut drops);
-                let lit = get_lit_leds(&drops);
+                let lit = get_lit_leds(&drops, r, g, b);
 
-                for &led in prev_lit.difference(&lit) {
-                    let _ = api.set_rgb_led(led, 0, 0, 0, 0).await;
+                // Turn off LEDs that disappeared
+                for (&led, _) in prev_lit.iter() {
+                    if !lit.contains_key(&led) {
+                        let _ = api.set_rgb_led(led, 0, 0, 0, 0).await;
+                    }
                 }
 
-                for &led in lit.difference(&prev_lit) {
-                    let _ = api.set_rgb_led(led, r, g, b, 0).await;
+                // Update LEDs whose color changed
+                for (&led, &(cr, cg, cb)) in lit.iter() {
+                    let changed = match prev_lit.get(&led) {
+                        Some(&(pr, pg, pb)) => cr != pr || cg != pg || cb != pb,
+                        None => true,
+                    };
+                    if changed {
+                        let _ = api.set_rgb_led(led, cr, cg, cb, 0).await;
+                    }
                 }
 
                 prev_lit = lit;

@@ -6,7 +6,7 @@ Matrix rain animation for ZSA Voyager keyboard LEDs, controlled via the [kontrol
 
 ## Overview
 
-A lightweight, smooth Matrix-style waterfall animation that runs directly on your ZSA Voyager's RGB LEDs. Designed for use as a tmux screensaver companion, but works standalone too.
+A lightweight, smooth Matrix-style waterfall animation that runs directly on your ZSA Voyager's RGB LEDs.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ zsa-voyager-matrix [OPTIONS]
 |------|---------|-------------|
 | `-c, --color` | `#69c11d` | LED color in hex format |
 | `-f, --fps` | `20` | Animation frames per second |
-| `-d, --drops` | `6` | Number of concurrent rain drops |
+| `-d, --drops` | `10` | Number of concurrent rain drops |
 
 ### Examples
 
@@ -63,23 +63,15 @@ zsa-voyager-matrix --color "#00ffff" --fps 25 --drops 10
 
 > **Note:** Always quote hex colors (e.g., `"#ff0000"`) — the `#` character starts a shell comment otherwise.
 
-## Tmux Integration
-
-Use with [tmux-cmatrix-screensaver](https://github.com/martelo/nixos-rised-workhorses) for a synchronized terminal + keyboard screensaver:
-
-```bash
-set -g lock-after-time 300
-set -g lock-command "tmux-cmatrix-screensaver"
-```
-
 ## How It Works
 
 - Connects to Keymapp via Unix domain socket (`~/.config/.keymapp/keymapp.sock`)
-- Animates 6 concurrent "rain drops" falling down a 5×12 LED grid
-- Each drop is 2–4 LEDs long, moving at randomized speeds
-- Only changed LEDs are updated each frame (~10–15 gRPC calls at 20 FPS)
+- Animates 10 concurrent "rain drops" falling down a 5×12 LED grid
+- Each drop is 3–5 LEDs long with a brightness gradient (head bright, tail fades to dim)
+- 15% of drops get a "sparkle" effect — a brighter leading LED
+- Only changed LEDs are updated each frame (~15–20 gRPC calls at 20 FPS)
 - Restores keyboard LEDs to default on exit (SIGTERM/SIGINT)
-- Silent failure if Keymapp is unavailable (exits 0)
+- Exits silently if Keymapp is unavailable (exits 0)
 
 ## Performance
 
