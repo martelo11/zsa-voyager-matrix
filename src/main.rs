@@ -20,6 +20,10 @@ struct Args {
     /// Number of concurrent rain drops
     #[arg(short, long, default_value = "6")]
     drops: usize,
+
+    /// Enable verbose output (prints connection status and frame info)
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 struct Drop {
@@ -41,17 +45,17 @@ fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
 }
 
 /// Map grid position (x: 0-11, y: 0-4) to Voyager LED index.
-/// Returns 60 for invalid positions (gaps in the thumb row).
-fn pos_to_led(x: usize, y: usize) -> usize {
-    // Voyager 5x12 layout from kontroll utils.rs
+fn pos_to_led(x: usize, y: usize) -> Option<usize> {
     let layout: [[usize; 12]; 5] = [
         [ 0,  1,  2,  3,  4,  5,  26, 27, 28, 29, 30, 31],
-        [ 6,  7,  8,  9,  10, 11, 32, 33, 34, 35, 36, 37],
+        [ 6,  7,  8,  9, 10, 11, 32, 33, 34, 35, 36, 37],
         [12, 13, 14, 15, 16, 17, 38, 39, 40, 41, 42, 43],
         [18, 19, 20, 21, 22, 23, 44, 45, 46, 47, 48, 49],
         [60, 60, 60, 60, 24, 25, 50, 51, 60, 60, 60, 60],
     ];
-    layout[y][x]
+    let led = layout[y][x];
+    // 60 is the sentinel for "no LED" (gaps in thumb row)
+    if led < 52 { Some(led) } else { None }
 }
 
 fn create_drops(count: usize) -> Vec<Drop> {
@@ -59,7 +63,7 @@ fn create_drops(count: usize) -> Vec<Drop> {
     (0..count)
         .map(|_| Drop {
             column: rng.gen_range(0..12),
-            head_row: rng.gen_range(-4.0..0.0), // Staggered above the grid
+            head_row: rng.gen_range(-4.0..0.0),
             length: rng.gen_range(2..=4),
             speed: rng.gen_range(0.15..0.45),
         })
@@ -70,7 +74,6 @@ fn update_drops(drops: &mut [Drop]) {
     let mut rng = rand::thread_rng();
     for drop in drops.iter_mut() {
         drop.head_row += drop.speed;
-        // Reset when the entire drop has passed the bottom
         if drop.head_row - drop.length as f32 > 4.0 {
             drop.column = rng.gen_range(0..12);
             drop.head_row = -(rng.gen_range(2.0..6.0));
@@ -80,7 +83,6 @@ fn update_drops(drops: &mut [Drop]) {
     }
 }
 
-/// Compute the set of LED indices that should be lit this frame.
 fn get_lit_leds(drops: &[Drop]) -> HashSet<usize> {
     let mut lit = HashSet::new();
     for drop in drops {
@@ -88,9 +90,7 @@ fn get_lit_leds(drops: &[Drop]) -> HashSet<usize> {
         for offset in 0..drop.length as isize {
             let row = head - offset;
             if row >= 0 && row < 5 {
-                let led = pos_to_led(drop.column, row as usize);
-                // 60 is the sentinel for "no LED" (gaps in thumb row)
-                if led < 52 {
+                if let Some(led) = pos_to_led(drop.column, row as usize) {
                     lit.insert(led);
                 }
             }
@@ -101,8 +101,8 @@ fn get_lit_leds(drops: &[Drop]) -> HashSet<usize> {
 
 #[tokio::main]
 async fn main() {
-    if run().await.is_err() {
-        // Silent exit on any error — the tmux wrapper must not be disturbed
+    if let Err(e) = run().await {
+        eprintln!("zsa-voyager-matrix error: {}", e);
         std::process::exit(0);
     }
 }
@@ -112,9 +112,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let (r, g, b) = hex_to_rgb(&args.color).ok_or("Invalid hex color")?;
 
-    // Connect to Keymapp and the first available keyboard
-    let api = Kontroll::new(None).await.map_err(|_| "Keymapp not running")?;
-    api.connect_any().await.map_err(|_| "No keyboard connected")?;
+    if args.verbose {
+        eprintln!("Connecting to Keymapp...");
+    }
+
+    let api = Kontroll::new(None).await.map_err(|e| {
+        format!("Failed to connect to Keymapp: {}", e)
+    })?;
+
+    let connected = api.connect_any().await.map_err(|e| {
+        format!("Failed to list keyboards: {}", e)
+    })?;
+
+    if !connected {
+        return Err("No keyboard connected to Keymapp".into());
+    }
+
+    if args.verbose {
+        eprintln!("Connected to keyboard. Starting animation...");
+        eprintln!("Color: RGB({}, {}, {}), FPS: {}, Drops: {}", r, g, b, args.fps, args.drops);
+    }
 
     let mut drops = create_drops(args.drops);
     let mut prev_lit: HashSet<usize> = HashSet::new();
@@ -122,7 +139,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let period = Duration::from_millis(1000 / args.fps.max(1));
     let mut ticker = interval(period);
 
-    // SIGTERM handler for graceful cleanup
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
     loop {
@@ -131,14 +147,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 update_drops(&mut drops);
                 let lit = get_lit_leds(&drops);
 
-                // LEDs that turned off since last frame
                 for &led in prev_lit.difference(&lit) {
-                    let _ = api.set_rgb_led(led, 0, 0, 0, 0).await;
+                    if let Err(e) = api.set_rgb_led(led, 0, 0, 0, 0).await {
+                        if args.verbose {
+                            eprintln!("Failed to turn off LED {}: {}", led, e);
+                        }
+                    }
                 }
 
-                // LEDs that turned on since last frame
                 for &led in lit.difference(&prev_lit) {
-                    let _ = api.set_rgb_led(led, r, g, b, 0).await;
+                    if let Err(e) = api.set_rgb_led(led, r, g, b, 0).await {
+                        if args.verbose {
+                            eprintln!("Failed to turn on LED {}: {}", led, e);
+                        }
+                    }
+                }
+
+                if args.verbose && (!lit.is_empty() || !prev_lit.is_empty()) {
+                    eprintln!("Frame: {} LEDs lit", lit.len());
                 }
 
                 prev_lit = lit;
@@ -149,7 +175,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Best-effort restore on exit
+    if args.verbose {
+        eprintln!("Restoring LEDs...");
+    }
     let _ = api.restore_rgb_leds().await;
 
     Ok(())
