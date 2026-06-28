@@ -2,35 +2,27 @@ use clap::Parser;
 use kontroll::Kontroll;
 use rand::Rng;
 use std::collections::HashSet;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, sleep, Duration};
 
-/// Matrix rain animation for ZSA Voyager keyboard LEDs
 #[derive(Parser, Debug)]
 #[command(name = "zsa-voyager-matrix")]
 #[command(about = "Matrix rain animation for ZSA Voyager keyboard LEDs")]
 struct Args {
-    /// LED color in hex format (e.g., #69c11d)
     #[arg(short, long, default_value = "#69c11d")]
     color: String,
 
-    /// Animation frames per second
     #[arg(short, long, default_value = "20")]
     fps: u64,
 
-    /// Number of concurrent rain drops
     #[arg(short, long, default_value = "6")]
     drops: usize,
-
-    /// Enable verbose output (prints connection status and frame info)
-    #[arg(short, long)]
-    verbose: bool,
 }
 
 struct Drop {
-    column: usize,   // 0-11
-    head_row: f32,   // float position (can be negative for staggered start)
-    length: usize,   // 2-4
-    speed: f32,      // rows per frame
+    column: usize,
+    head_row: f32,
+    length: usize,
+    speed: f32,
 }
 
 fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
@@ -44,7 +36,6 @@ fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
-/// Map grid position (x: 0-11, y: 0-4) to Voyager LED index.
 fn pos_to_led(x: usize, y: usize) -> Option<usize> {
     let layout: [[usize; 12]; 5] = [
         [ 0,  1,  2,  3,  4,  5,  26, 27, 28, 29, 30, 31],
@@ -54,7 +45,6 @@ fn pos_to_led(x: usize, y: usize) -> Option<usize> {
         [60, 60, 60, 60, 24, 25, 50, 51, 60, 60, 60, 60],
     ];
     let led = layout[y][x];
-    // 60 is the sentinel for "no LED" (gaps in thumb row)
     if led < 52 { Some(led) } else { None }
 }
 
@@ -102,8 +92,8 @@ fn get_lit_leds(drops: &[Drop]) -> HashSet<usize> {
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        eprintln!("zsa-voyager-matrix error: {}", e);
-        std::process::exit(0);
+        eprintln!("zsa-voyager-matrix: {}", e);
+        std::process::exit(1);
     }
 }
 
@@ -112,26 +102,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let (r, g, b) = hex_to_rgb(&args.color).ok_or("Invalid hex color")?;
 
-    if args.verbose {
-        eprintln!("Connecting to Keymapp...");
-    }
+    eprintln!("zsa-voyager-matrix: connecting to Keymapp...");
+    let api = Kontroll::new(None).await.map_err(|e| format!("Keymapp connection failed: {}", e))?;
 
-    let api = Kontroll::new(None).await.map_err(|e| {
-        format!("Failed to connect to Keymapp: {}", e)
-    })?;
-
-    let connected = api.connect_any().await.map_err(|e| {
-        format!("Failed to list keyboards: {}", e)
-    })?;
-
+    let connected = api.connect_any().await.map_err(|e| format!("Keyboard listing failed: {}", e))?;
     if !connected {
         return Err("No keyboard connected to Keymapp".into());
     }
+    eprintln!("zsa-voyager-matrix: connected! Flashing all LEDs to confirm...");
 
-    if args.verbose {
-        eprintln!("Connected to keyboard. Starting animation...");
-        eprintln!("Color: RGB({}, {}, {}), FPS: {}, Drops: {}", r, g, b, args.fps, args.drops);
-    }
+    // Startup flash: all LEDs on for 1 second so user immediately sees it works
+    api.set_rgb_all(r, g, b, 1).await.map_err(|e| format!("set_rgb_all failed: {}", e))?;
+    sleep(Duration::from_secs(1)).await;
+    api.set_rgb_all(0, 0, 0, 1).await.ok();
+    eprintln!("zsa-voyager-matrix: starting animation (color: #{}, fps: {}, drops: {})", args.color, args.fps, args.drops);
 
     let mut drops = create_drops(args.drops);
     let mut prev_lit: HashSet<usize> = HashSet::new();
@@ -148,23 +132,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let lit = get_lit_leds(&drops);
 
                 for &led in prev_lit.difference(&lit) {
-                    if let Err(e) = api.set_rgb_led(led, 0, 0, 0, 0).await {
-                        if args.verbose {
-                            eprintln!("Failed to turn off LED {}: {}", led, e);
-                        }
-                    }
+                    let _ = api.set_rgb_led(led, 0, 0, 0, 1).await;
                 }
 
                 for &led in lit.difference(&prev_lit) {
-                    if let Err(e) = api.set_rgb_led(led, r, g, b, 0).await {
-                        if args.verbose {
-                            eprintln!("Failed to turn on LED {}: {}", led, e);
-                        }
-                    }
-                }
-
-                if args.verbose && (!lit.is_empty() || !prev_lit.is_empty()) {
-                    eprintln!("Frame: {} LEDs lit", lit.len());
+                    let _ = api.set_rgb_led(led, r, g, b, 1).await;
                 }
 
                 prev_lit = lit;
@@ -175,9 +147,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if args.verbose {
-        eprintln!("Restoring LEDs...");
-    }
+    eprintln!("zsa-voyager-matrix: restoring LEDs...");
     let _ = api.restore_rgb_leds().await;
 
     Ok(())
