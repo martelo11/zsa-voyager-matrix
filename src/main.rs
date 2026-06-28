@@ -14,7 +14,7 @@ struct Args {
     #[arg(short, long, default_value = "20")]
     fps: u64,
 
-    #[arg(short, long, default_value = "6")]
+    #[arg(short, long, default_value = "10")]
     drops: usize,
 }
 
@@ -53,9 +53,9 @@ fn create_drops(count: usize) -> Vec<Drop> {
     (0..count)
         .map(|_| Drop {
             column: rng.gen_range(0..12),
-            head_row: rng.gen_range(-4.0..0.0),
+            head_row: rng.gen_range(-8.0..0.0),
             length: rng.gen_range(2..=4),
-            speed: rng.gen_range(0.15..0.45),
+            speed: rng.gen_range(0.08..0.20),
         })
         .collect()
 }
@@ -66,9 +66,9 @@ fn update_drops(drops: &mut [Drop]) {
         drop.head_row += drop.speed;
         if drop.head_row - drop.length as f32 > 4.0 {
             drop.column = rng.gen_range(0..12);
-            drop.head_row = -(rng.gen_range(2.0..6.0));
+            drop.head_row = -(rng.gen_range(4.0..10.0));
             drop.length = rng.gen_range(2..=4);
-            drop.speed = rng.gen_range(0.15..0.45);
+            drop.speed = rng.gen_range(0.08..0.20);
         }
     }
 }
