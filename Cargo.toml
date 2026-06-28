@@ -1,0 +1,13 @@
+[package]
+name = "zsa-voyager-matrix"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Matrix rain animation for ZSA Voyager keyboard LEDs via kontroll"
+repository = "https://github.com/martelo11/zsa-voyager-matrix"
+
+[dependencies]
+kontroll = "1"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
