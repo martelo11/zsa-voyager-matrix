@@ -10,9 +10,19 @@ A lightweight, smooth Matrix-style waterfall animation that runs directly on you
 
 ## Prerequisites
 
-- ZSA Voyager keyboard (or any ZSA keyboard supported by kontroll)
-- [Keymapp](https://www.zsa.io/voyager) v1.3.2+ running with API enabled
+- **ZSA Voyager** keyboard (see [Keyboard Compatibility](#keyboard-compatibility) below)
+- **[Keymapp](https://www.zsa.io/voyager) v1.3.2+** running with the **API enabled** in settings
 - Linux with a Rust toolchain (or Nix)
+
+> **Note:** Keymapp must be running and the API must be active *before* starting the animation. See the [kontroll announcement blog post](https://blog.zsa.io/introducing-kontroll/) for details on the Keymapp API.
+
+## Keyboard Compatibility
+
+| Keyboard | Status | Notes |
+|----------|--------|-------|
+| **ZSA Voyager** | ✅ Native | Designed for the Voyager 5×12 LED grid |
+| **Moonlander** | ⚠️ Adoptable | Uses the same RGB API, but the 5×12 grid mapping in `src/main.rs` would need adjustment for the Moonlander's layout |
+| **ErgoDox EZ** | ❌ Not supported | Kontroll cannot control RGB LEDs on the ErgoDox EZ ([see upstream docs](https://github.com/zsa/kontroll)) |
 
 ## Installation
 
