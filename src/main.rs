@@ -110,10 +110,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("zsa-voyager-matrix: flashing all LEDs to confirm...");
 
     // Startup flash: all LEDs on for 1 second so user immediately sees it works
-    api.set_rgb_all(r, g, b, 1).await.map_err(|e| format!("set_rgb_all failed: {}", e))?;
+    api.set_rgb_all(r, g, b, 0).await.map_err(|e| format!("set_rgb_all failed: {}", e))?;
     sleep(Duration::from_secs(1)).await;
-    api.set_rgb_all(0, 0, 0, 1).await.ok();
-    eprintln!("zsa-voyager-matrix: starting animation (color: #{}, fps: {}, drops: {})", args.color, args.fps, args.drops);
+    api.set_rgb_all(0, 0, 0, 0).await.ok();
+    eprintln!("zsa-voyager-matrix: starting animation (color: {}, fps: {}, drops: {})", args.color, args.fps, args.drops);
 
     let mut drops = create_drops(args.drops);
     let mut prev_lit: HashSet<usize> = HashSet::new();
@@ -130,11 +130,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let lit = get_lit_leds(&drops);
 
                 for &led in prev_lit.difference(&lit) {
-                    let _ = api.set_rgb_led(led, 0, 0, 0, 1).await;
+                    let _ = api.set_rgb_led(led, 0, 0, 0, 0).await;
                 }
 
                 for &led in lit.difference(&prev_lit) {
-                    let _ = api.set_rgb_led(led, r, g, b, 1).await;
+                    let _ = api.set_rgb_led(led, r, g, b, 0).await;
                 }
 
                 prev_lit = lit;
