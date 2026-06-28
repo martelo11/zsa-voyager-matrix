@@ -105,11 +105,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("zsa-voyager-matrix: connecting to Keymapp...");
     let api = Kontroll::new(None).await.map_err(|e| format!("Keymapp connection failed: {}", e))?;
 
-    let connected = api.connect_any().await.map_err(|e| format!("Keyboard listing failed: {}", e))?;
-    if !connected {
-        return Err("No keyboard connected to Keymapp".into());
-    }
-    eprintln!("zsa-voyager-matrix: connected! Flashing all LEDs to confirm...");
+    // Keymapp auto-connects; ignore "already connected" errors
+    let _ = api.connect_any().await;
+    eprintln!("zsa-voyager-matrix: flashing all LEDs to confirm...");
 
     // Startup flash: all LEDs on for 1 second so user immediately sees it works
     api.set_rgb_all(r, g, b, 1).await.map_err(|e| format!("set_rgb_all failed: {}", e))?;
