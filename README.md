@@ -52,14 +52,16 @@ zsa-voyager-matrix [OPTIONS]
 zsa-voyager-matrix
 
 # Classic Matrix green at 30 FPS
-zsa-voyager-matrix --color #00ff00 --fps 30
+zsa-voyager-matrix --color "#00ff00" --fps 30
 
 # Sparse, slow red rain
-zsa-voyager-matrix --color #ff0000 --fps 10 --drops 3
+zsa-voyager-matrix --color "#ff0000" --fps 10 --drops 3
 
 # Dense cyan waterfall
-zsa-voyager-matrix --color #00ffff --fps 25 --drops 10
+zsa-voyager-matrix --color "#00ffff" --fps 25 --drops 10
 ```
+
+> **Note:** Always quote hex colors (e.g., `"#ff0000"`) — the `#` character starts a shell comment otherwise.
 
 ## Tmux Integration
 
